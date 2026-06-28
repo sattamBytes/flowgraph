@@ -104,8 +104,8 @@ func TestSuppression(t *testing.T) {
 	file := filepath.Join(dir, "x.go")
 	os.WriteFile(file, []byte(
 		"line1\n"+
-			"call() //fg:ignore unknown-name\n"+ // line 2: suppress only unknown-name
-			"call() //fg:ignore\n"+ // line 3: suppress everything
+			"call() //flowgraph:ignore unknown-name\n"+ // line 2: suppress only unknown-name
+			"call() //flowgraph:ignore\n"+ // line 3: suppress everything
 			"call() // no directive\n", // line 4: nothing
 	), 0o644)
 
@@ -121,7 +121,7 @@ func TestSuppression(t *testing.T) {
 	}
 	for _, f := range got {
 		if f.Line == 3 {
-			t.Error("bare //fg:ignore should have suppressed line 3")
+			t.Error("bare //flowgraph:ignore should have suppressed line 3")
 		}
 		if f.Rule == "unknown-name" && f.Line == 2 {
 			t.Error("named directive should have suppressed unknown-name on line 2")
@@ -132,7 +132,7 @@ func TestSuppression(t *testing.T) {
 func TestSuppressionDirectiveOnLineAbove(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "y.go")
-	os.WriteFile(file, []byte("//fg:ignore orphan\nregisterThing()\n"), 0o644)
+	os.WriteFile(file, []byte("//flowgraph:ignore orphan\nregisterThing()\n"), 0o644)
 	got := FilterSuppressed([]Finding{{Rule: "orphan", File: file, Line: 2}})
 	if len(got) != 0 {
 		t.Errorf("directive on the line above should suppress, got %+v", got)

@@ -1,6 +1,6 @@
-// Command fg is the flowgraph CLI: it statically maps how a Go app flows —
-// from REST/Temporal entrypoints, through function calls and branches, and
-// across Temporal's connect-by-name boundary into workflows and activities.
+// Command flowgraph statically maps how a Go app flows — from REST/Temporal
+// entrypoints, through function calls and branches, and across Temporal's
+// connect-by-name boundary into workflows and activities.
 package main
 
 import (
@@ -19,12 +19,12 @@ import (
 
 func main() {
 	root := &cobra.Command{
-		Use:   "fg",
+		Use:   "flowgraph",
 		Short: "flowgraph: static code-flow analysis for Go (REST + Temporal aware)",
-		Long: "fg statically maps how a Go application flows: from entrypoints (REST routes,\n" +
-			"Temporal workflows) through function calls and the branches that guard them, and\n" +
-			"across Temporal's connect-by-name boundary into workflows and activities.\n" +
-			"It never executes your code.",
+		Long: "flowgraph statically maps how a Go application flows: from entrypoints (REST\n" +
+			"routes, Temporal workflows) through function calls and the branches that guard\n" +
+			"them, and across Temporal's connect-by-name boundary into workflows and\n" +
+			"activities. It never executes your code.",
 	}
 	root.AddCommand(buildCmd(), checkCmd(), exportCmd(), serveCmd(), mcpCmd(), listCmd())
 	if err := root.Execute(); err != nil {

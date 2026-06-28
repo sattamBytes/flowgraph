@@ -1,4 +1,4 @@
-# flowgraph (`fg`)
+# flowgraph
 
 Static **code-flow analysis for Go**. Point it at your app and it maps how a
 request actually flows: from an **entrypoint** (a REST route or a Temporal
@@ -24,10 +24,10 @@ Two blind spots in normal tooling:
                                              workflow.ExecuteActivity(ctx, ChargeCard, id)
                                          }
    ```
-   A call follower sees a string and stops. `fg` walks through it.
+   A call follower sees a string and stops. `flowgraph` walks through it.
 
 2. **Multi-language tools (Tree-sitter based) are imprecise** and have no REST
-   route parsing, no branch flow, and no Temporal awareness. `fg` trades breadth
+   route parsing, no branch flow, and no Temporal awareness. `flowgraph` trades breadth
    for Go-native precision.
 
 ## What you get
@@ -56,12 +56,12 @@ POST /orders → CreateOrderHandler
 ## Install
 
 ```bash
-brew install sattamBytes/tap/fg
+brew install sattamBytes/tap/flowgraph
 # or
-go install github.com/sattamBytes/flowgraph/cmd/fg@latest
+go install github.com/sattamBytes/flowgraph/cmd/flowgraph@latest
 ```
 
-> `fg` needs the Go toolchain at runtime — it drives `go list` (`go/packages`)
+> `flowgraph` needs the Go toolchain at runtime — it drives `go list` (`go/packages`)
 > to type-check the project it analyzes. The Homebrew formula pulls `go` in.
 
 ## Usage
@@ -69,16 +69,16 @@ go install github.com/sattamBytes/flowgraph/cmd/fg@latest
 Run from your repo root (where `go build ./...` works):
 
 ```bash
-fg list   ./...                       # what entrypoints did it find?
-fg serve  ./...                       # interactive dashboard (pick an entrypoint, trace its flow)
-fg build  ./...                       # canonical JSON graph (everything is built from this)
-fg check  ./...                       # Temporal lint rules; non-zero exit on errors (CI gate)
-fg export ./... --format mermaid      # docs diagram (also: dot)
-fg mcp    ./...                       # MCP server (stdio) for AI agents
+flowgraph list   ./...                       # what entrypoints did it find?
+flowgraph serve  ./...                       # interactive dashboard (pick an entrypoint, trace its flow)
+flowgraph build  ./...                       # canonical JSON graph (everything is built from this)
+flowgraph check  ./...                       # Temporal lint rules; non-zero exit on errors (CI gate)
+flowgraph export ./... --format mermaid      # docs diagram (also: dot)
+flowgraph mcp    ./...                       # MCP server (stdio) for AI agents
 ```
 
 The path arg follows Go conventions (`./...`, a dir, a package pattern). For a
-monorepo with control plane and workers in different modules, run `fg` at the
+monorepo with control plane and workers in different modules, run `flowgraph` at the
 common root — it loads them together so the by-name wiring resolves across
 services.
 
@@ -88,14 +88,14 @@ Pick an entrypoint → trace its downstream flow (handler → calls → branches
 workflow → activities); everything else collapses. Click any node for its blast
 radius (callers + callees). Branch guards show on call edges; unresolved/unknown
 edges are dashed-red; `HANDLES` edges (route → handler) are dotted. Reads only
-`graph.json`, so it works headless too: `fg serve --graph graph.json`.
+`graph.json`, so it works headless too: `flowgraph serve --graph graph.json`.
 
 ## MCP (`mcp`)
 
 Wire into Claude Code (`.mcp.json`):
 
 ```json
-{ "mcpServers": { "fg": { "command": "fg", "args": ["mcp", "./..."] } } }
+{ "mcpServers": { "flowgraph": { "command": "flowgraph", "args": ["mcp", "./..."] } } }
 ```
 
 Tools: `list_entrypoints`-style queries via `callers`, `callees`, `downstream`,
@@ -106,7 +106,7 @@ Tools: `list_entrypoints`-style queries via `callers`, `callees`, `downstream`,
 `check` stays Temporal-focused and is a drop-in CI gate (exit non-zero on
 errors): `task-queue-mismatch` (headline), `unknown-name`, `orphan`,
 `signal-mismatch`, `non-determinism`, `missing-timeout` / `missing-retry`.
-Silence a false positive inline: `//fg:ignore <rule>`.
+Silence a false positive inline: `//flowgraph:ignore <rule>`.
 
 ## Design notes & limits
 
