@@ -53,9 +53,21 @@ headless / in CI.
 
 ## Install
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew install sattamBytes/tap/tcg
+```
+
+### go install
+
 ```bash
 go install github.com/sattamBytes/temporal-code-graph/cmd/tcg@latest
 ```
+
+> `tcg` needs the Go toolchain available at runtime — it drives `go list`
+> (`go/packages`) to type-check the project it analyzes. The Homebrew formula
+> pulls `go` in as a dependency automatically.
 
 ## Usage
 
