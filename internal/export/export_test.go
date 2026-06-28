@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sattamBytes/temporal-code-graph/internal/analyze"
-	"github.com/sattamBytes/temporal-code-graph/internal/export"
-	"github.com/sattamBytes/temporal-code-graph/internal/graph"
+	"github.com/sattamBytes/flowgraph/internal/analyze"
+	"github.com/sattamBytes/flowgraph/internal/export"
+	"github.com/sattamBytes/flowgraph/internal/graph"
 )
 
 func load(t *testing.T) *graph.Graph {

@@ -1,4 +1,4 @@
-module github.com/sattamBytes/temporal-code-graph
+module github.com/sattamBytes/flowgraph
 
 go 1.25.0
 

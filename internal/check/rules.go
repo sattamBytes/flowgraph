@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/sattamBytes/temporal-code-graph/internal/graph"
+	"github.com/sattamBytes/flowgraph/internal/graph"
 )
 
 // Severities.

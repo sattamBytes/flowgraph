@@ -11,7 +11,7 @@ import (
 
 	_ "embed"
 
-	"github.com/sattamBytes/temporal-code-graph/internal/graph"
+	"github.com/sattamBytes/flowgraph/internal/graph"
 )
 
 //go:embed web/index.html
@@ -38,7 +38,7 @@ func Serve(g *graph.Graph, addr string, open bool) error {
 		w.Write(indexHTML)
 	})
 	url := "http://" + addr
-	fmt.Printf("temporal-code-graph dashboard: %s  (Ctrl-C to stop)\n", url)
+	fmt.Printf("flowgraph dashboard: %s  (Ctrl-C to stop)\n", url)
 	if open {
 		openBrowser(url)
 	}

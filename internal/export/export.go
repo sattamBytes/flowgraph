@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sattamBytes/temporal-code-graph/internal/graph"
+	"github.com/sattamBytes/flowgraph/internal/graph"
 )
 
 // ids assigns each node a stable, syntax-safe short id (n0, n1, ...).
@@ -55,7 +55,10 @@ func Mermaid(g *graph.Graph) string {
 	}
 	b.WriteString("  classDef workflow fill:#dbeafe,stroke:#2563eb;\n")
 	b.WriteString("  classDef activity fill:#dcfce7,stroke:#16a34a;\n")
-	b.WriteString("  classDef controlplanecaller fill:#fef9c3,stroke:#ca8a04;\n")
+	b.WriteString("  classDef function fill:#f1f5f9,stroke:#64748b;\n")
+	b.WriteString("  classDef interfacecall fill:#fee2e2,stroke:#dc2626;\n")
+	b.WriteString("  classDef restendpoint fill:#fef9c3,stroke:#ca8a04;\n")
+	b.WriteString("  classDef grpcendpoint fill:#fef9c3,stroke:#ca8a04;\n")
 	b.WriteString("  classDef signal fill:#fae8ff,stroke:#a21caf;\n")
 	b.WriteString("  classDef query fill:#ffedd5,stroke:#ea580c;\n")
 	return b.String()
@@ -68,8 +71,10 @@ func nodeShape(kind, lbl string) string {
 		return fmt.Sprintf("[%q]", lbl)
 	case graph.KindActivity:
 		return fmt.Sprintf("([%q])", lbl)
-	case graph.KindControlPlaneCaller:
+	case graph.KindRESTEndpoint, graph.KindGRPCEndpoint, graph.KindControlPlaneCaller:
 		return fmt.Sprintf("[/%q/]", lbl)
+	case graph.KindFunction, graph.KindInterface:
+		return fmt.Sprintf("[%q]", lbl)
 	default: // signal, query
 		return fmt.Sprintf("{{%q}}", lbl)
 	}
@@ -105,7 +110,11 @@ func dotColor(kind string) string {
 		return "#dbeafe"
 	case graph.KindActivity:
 		return "#dcfce7"
-	case graph.KindControlPlaneCaller:
+	case graph.KindFunction:
+		return "#f1f5f9"
+	case graph.KindInterface:
+		return "#fee2e2"
+	case graph.KindRESTEndpoint, graph.KindGRPCEndpoint, graph.KindControlPlaneCaller:
 		return "#fef9c3"
 	case graph.KindSignal:
 		return "#fae8ff"

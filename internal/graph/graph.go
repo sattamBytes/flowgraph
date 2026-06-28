@@ -3,7 +3,7 @@
 // The JSON serialization of Graph is the project's canonical artifact: every
 // other output (check, export, serve, mcp) is built from it. Keep this struct
 // stable and self-contained — it must carry everything the lint rules and the
-// dashboard need, so that `tcg serve --graph graph.json` works with no source.
+// dashboard need, so that `fg serve --graph graph.json` works with no source.
 package graph
 
 // Node kinds.
@@ -13,6 +13,11 @@ const (
 	KindActivity           = "Activity"
 	KindSignal             = "Signal"
 	KindQuery              = "Query"
+	// General code-flow kinds (flowgraph).
+	KindFunction     = "Function"      // a plain function or a resolved method
+	KindInterface    = "InterfaceCall" // an interface method whose impl is unknown
+	KindRESTEndpoint = "RESTEndpoint"  // an HTTP route entrypoint
+	KindGRPCEndpoint = "GRPCEndpoint"  // a gRPC method entrypoint
 )
 
 // Edge kinds.
@@ -21,7 +26,17 @@ const (
 	EdgeExecutesActivity = "EXECUTES_ACTIVITY"
 	EdgeStartsChild      = "STARTS_CHILD"
 	EdgeSignals          = "SIGNALS"
+	// General code-flow edges (flowgraph).
+	EdgeCalls   = "CALLS"   // function -> function
+	EdgeHandles = "HANDLES" // entrypoint -> handler function
 )
+
+// Branch describes the nearest control-flow guard around a call site, so the UI
+// can show "applyCoupon() runs only if req.Coupon != \"\"".
+type Branch struct {
+	Kind string `json:"kind"`           // if | else | case | for | select
+	Cond string `json:"cond,omitempty"` // source text of the guard, truncated
+}
 
 // Resolution status of an edge.
 const (
@@ -43,26 +58,33 @@ type Node struct {
 	File        string   `json:"file"`
 	Line        int      `json:"line"`
 	Service     string   `json:"service,omitempty"`     // package name, for filtering
+	Package     string   `json:"package,omitempty"`     // full package path
 	Namespace   string   `json:"namespace,omitempty"`   // Temporal namespace, "default" if unknown
 	TaskQueues  []string `json:"taskQueues,omitempty"`  // queues a workflow/activity is REGISTERED on
 	Registered  bool     `json:"registered,omitempty"`  // true if seen at a Register* site
 	Started     bool     `json:"started,omitempty"`     // set during finalize: has an inbound start/exec edge
 	HasListener bool     `json:"hasListener,omitempty"` // for Signal/Query: a handler exists
+	// REST/gRPC entrypoint fields.
+	Method        string `json:"method,omitempty"`        // HTTP verb / gRPC kind
+	Path          string `json:"path,omitempty"`          // route path
+	HandlerSymbol string `json:"handlerSymbol,omitempty"` // symbol of the handler func
+	Entrypoint    bool   `json:"entrypoint,omitempty"`    // true for REST/gRPC roots
 }
 
 // Edge is a directed relationship. Every edge carries a resolution status plus
 // the task queue and (when statically readable) timeout/retry metadata.
 type Edge struct {
-	From       string `json:"from"`
-	To         string `json:"to"`
-	Kind       string `json:"kind"`
-	Resolution string `json:"resolution"`
-	TaskQueue  string `json:"taskQueue,omitempty"`  // queue used at the start site
-	TargetName string `json:"targetName,omitempty"` // the name/string referenced
-	HasTimeout bool   `json:"hasTimeout,omitempty"` // EXECUTES_ACTIVITY: workflow set a timeout
-	HasRetry   bool   `json:"hasRetry,omitempty"`   // EXECUTES_ACTIVITY: workflow set a retry policy
-	File       string `json:"file"`
-	Line       int    `json:"line"`
+	From       string  `json:"from"`
+	To         string  `json:"to"`
+	Kind       string  `json:"kind"`
+	Resolution string  `json:"resolution"`
+	TaskQueue  string  `json:"taskQueue,omitempty"`  // queue used at the start site
+	TargetName string  `json:"targetName,omitempty"` // the name/string referenced
+	HasTimeout bool    `json:"hasTimeout,omitempty"` // EXECUTES_ACTIVITY: workflow set a timeout
+	HasRetry   bool    `json:"hasRetry,omitempty"`   // EXECUTES_ACTIVITY: workflow set a retry policy
+	Branch     *Branch `json:"branch,omitempty"`     // CALLS: the guard around the call site
+	File       string  `json:"file"`
+	Line       int     `json:"line"`
 }
 
 // Smell is a non-determinism finding located inside a workflow function. It is

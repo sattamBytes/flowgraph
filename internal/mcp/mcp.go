@@ -8,7 +8,7 @@ import (
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sattamBytes/temporal-code-graph/internal/graph"
+	"github.com/sattamBytes/flowgraph/internal/graph"
 )
 
 type nodeRef struct {
@@ -50,7 +50,7 @@ func Serve(g *graph.Graph) error {
 // newServer builds the MCP server with all query tools registered. Split out
 // from Serve so tests can drive it over an in-memory transport.
 func newServer(g *graph.Graph) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "temporal-code-graph", Version: "0.1.0"}, nil)
+	s := mcp.NewServer(&mcp.Implementation{Name: "flowgraph", Version: "0.1.0"}, nil)
 
 	mcp.AddTool(s, &mcp.Tool{Name: "downstream",
 		Description: "List everything a node triggers (transitive: activities, child workflows, signals)."},
@@ -70,6 +70,20 @@ func newServer(g *graph.Graph) *mcp.Server {
 		Description: "List the control-plane call sites that start a given workflow by name."},
 		func(_ context.Context, _ *mcp.CallToolRequest, in nodeQuery) (*mcp.CallToolResult, nodeResult, error) {
 			out := nodeResult{Query: in.Node, Nodes: whoStarts(g, in.Node)}
+			return text(out), out, nil
+		})
+
+	mcp.AddTool(s, &mcp.Tool{Name: "callees",
+		Description: "List the functions a given function calls directly (one hop, CALLS edges)."},
+		func(_ context.Context, _ *mcp.CallToolRequest, in nodeQuery) (*mcp.CallToolResult, nodeResult, error) {
+			out := nodeResult{Query: in.Node, Nodes: neighbors(g, in.Node, true)}
+			return text(out), out, nil
+		})
+
+	mcp.AddTool(s, &mcp.Tool{Name: "callers",
+		Description: "List the functions that call a given function directly (one hop, CALLS edges)."},
+		func(_ context.Context, _ *mcp.CallToolRequest, in nodeQuery) (*mcp.CallToolResult, nodeResult, error) {
+			out := nodeResult{Query: in.Node, Nodes: neighbors(g, in.Node, false)}
 			return text(out), out, nil
 		})
 
@@ -135,6 +149,40 @@ func refs(g *graph.Graph, ids []string) []nodeRef {
 		}
 	}
 	return out
+}
+
+// neighbors returns the direct CALLS callees (out=true) or callers (out=false)
+// of every node named `name`.
+func neighbors(g *graph.Graph, name string, out bool) []nodeRef {
+	want := map[string]bool{}
+	for _, n := range g.Nodes {
+		if n.Name == name {
+			want[n.ID] = true
+		}
+	}
+	seen := map[string]bool{}
+	res := []nodeRef{}
+	for _, e := range g.Edges {
+		if e.Kind != graph.EdgeCalls {
+			continue
+		}
+		var other string
+		if out && want[e.From] {
+			other = e.To
+		} else if !out && want[e.To] {
+			other = e.From
+		} else {
+			continue
+		}
+		if seen[other] {
+			continue
+		}
+		seen[other] = true
+		if n := g.NodeByID(other); n != nil {
+			res = append(res, nodeRef{Name: n.Name, Kind: n.Kind, File: n.File, Line: n.Line})
+		}
+	}
+	return res
 }
 
 func whoStarts(g *graph.Graph, name string) []nodeRef {

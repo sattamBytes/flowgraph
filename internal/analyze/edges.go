@@ -6,7 +6,7 @@ import (
 	"go/types"
 	"strings"
 
-	"github.com/sattamBytes/temporal-code-graph/internal/graph"
+	"github.com/sattamBytes/flowgraph/internal/graph"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -38,24 +38,16 @@ func (a *analyzer) processFunc(pkg *packages.Package, fd *ast.FuncDecl) {
 	// carry timeout/retry/queue metadata set elsewhere in the same function.
 	actTimeout, actRetry, childTQ := a.scanFuncOptions(info, fd)
 
-	var cpNode *graph.Node
-	wfNodeID := ""
+	// The enclosing function is ONE unified node (see symNode): a Workflow if its
+	// first param is workflow.Context, otherwise a plain Function. A function that
+	// starts a workflow is just a Function with an outgoing STARTS_WORKFLOW edge —
+	// no separate ControlPlaneCaller node — so call chains bridge into Temporal.
+	selfKind := graph.KindFunction
 	if isWf {
-		wfNodeID = a.symNode(graph.KindWorkflow, funcObj).ID
+		selfKind = graph.KindWorkflow
 	}
 	self := func() string {
-		if wfNodeID != "" {
-			return wfNodeID
-		}
-		if cpNode == nil {
-			f, l := a.pos(fd.Pos())
-			cpNode = a.ensureNode(&graph.Node{
-				ID: "cp:" + funcSymbol(funcObj), Kind: graph.KindControlPlaneCaller,
-				Name: funcObj.Name(), Symbol: funcSymbol(funcObj),
-				File: f, Line: l, Service: pkg.Name, Namespace: "default",
-			})
-		}
-		return cpNode.ID
+		return a.symNode(selfKind, funcObj).ID
 	}
 
 	ast.Inspect(fd.Body, func(n ast.Node) bool {

@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sattamBytes/temporal-code-graph/internal/analyze"
-	"github.com/sattamBytes/temporal-code-graph/internal/graph"
+	"github.com/sattamBytes/flowgraph/internal/analyze"
+	"github.com/sattamBytes/flowgraph/internal/graph"
 )
 
 func load(t *testing.T) *graph.Graph {
@@ -74,6 +74,16 @@ func TestListUnresolved(t *testing.T) {
 	}
 	if !hasTypo {
 		t.Error("list_unresolved should include the unknown typo'd name")
+	}
+}
+
+func TestCalleesAndCallers(t *testing.T) {
+	g := load(t)
+	if !names(neighbors(g, "Handle", true))["prepare"] {
+		t.Error("callees(Handle) should include prepare")
+	}
+	if !names(neighbors(g, "prepare", false))["Handle"] {
+		t.Error("callers(prepare) should include Handle")
 	}
 }
 

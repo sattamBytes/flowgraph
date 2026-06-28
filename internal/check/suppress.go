@@ -8,13 +8,13 @@ import (
 // suppressMarker is the inline directive. Place it on the offending line or the
 // line directly above it:
 //
-//	client.ExecuteWorkflow(ctx, o, name) //tcg:ignore unknown-name
+//	client.ExecuteWorkflow(ctx, o, name) //fg:ignore unknown-name
 //
 // With no rule names it suppresses every rule on that line; with one or more
 // rule names it suppresses only those.
-const suppressMarker = "tcg:ignore"
+const suppressMarker = "fg:ignore"
 
-// FilterSuppressed removes findings silenced by an inline //tcg:ignore comment.
+// FilterSuppressed removes findings silenced by an inline //fg:ignore comment.
 // It reads the source files directly, so suppression needs no state in the graph.
 func FilterSuppressed(findings []Finding) []Finding {
 	cache := map[string][]string{}

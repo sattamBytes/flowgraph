@@ -20,7 +20,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sattamBytes/temporal-code-graph/internal/graph"
+	"github.com/sattamBytes/flowgraph/internal/graph"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -55,6 +55,9 @@ type analyzer struct {
 	nodes  map[string]*graph.Node
 	edges  []graph.Edge
 	smells []graph.Smell
+
+	// pass 3 (call graph): functions defined in the analyzed packages
+	localFuncs map[*types.Func]bool
 }
 
 func newAnalyzer() *analyzer {
@@ -65,6 +68,7 @@ func newAnalyzer() *analyzer {
 		symRegName:   map[*types.Func]string{},
 		symQueues:    map[*types.Func][]string{},
 		nodes:        map[string]*graph.Node{},
+		localFuncs:   map[*types.Func]bool{},
 	}
 }
 
@@ -79,6 +83,7 @@ func Analyze(path string) (*graph.Graph, error) {
 	a.pass1Registry()
 	a.pass2Edges()
 	a.ensureRegisteredNodes()
+	a.pass3Calls()
 	return a.finalize(), nil
 }
 
@@ -310,14 +315,37 @@ func (a *analyzer) ensureNode(n *graph.Node) *graph.Node {
 	return n
 }
 
-// workflowNodeForSym returns (creating if needed) the node for a workflow symbol.
-func (a *analyzer) symNode(kind string, fn *types.Func) *graph.Node {
-	prefix := "wf:"
-	if kind == graph.KindActivity {
-		prefix = "act:"
+// kindRank orders node kinds so a richer role wins when the same Go function is
+// seen in multiple roles (a workflow that is also reached as a plain call stays
+// a Workflow, not downgraded to Function).
+func kindRank(kind string) int {
+	switch kind {
+	case graph.KindWorkflow, graph.KindActivity:
+		return 3
+	case graph.KindRESTEndpoint, graph.KindGRPCEndpoint:
+		return 2
+	default: // Function, etc.
+		return 1
 	}
-	id := prefix + funcSymbol(fn)
+}
+
+// symNode returns the single unified node for a Go function, keyed by symbol
+// regardless of role. A function is ONE node whether it is a plain function, a
+// workflow, an activity, or an entrypoint — this is what lets a call chain bridge
+// seamlessly into Temporal edges. The kind is upgraded but never downgraded.
+func (a *analyzer) symNode(kind string, fn *types.Func) *graph.Node {
+	id := "fn:" + funcSymbol(fn)
 	if ex, ok := a.nodes[id]; ok {
+		if kindRank(kind) > kindRank(ex.Kind) {
+			ex.Kind = kind
+		}
+		// Fill registration metadata if it became known after creation.
+		if len(ex.TaskQueues) == 0 && len(a.symQueues[fn]) > 0 {
+			ex.TaskQueues = a.symQueues[fn]
+		}
+		if !ex.Registered && a.symRegName[fn] != "" {
+			ex.Registered = true
+		}
 		return ex
 	}
 	file, line := a.pos(fn.Pos())
@@ -325,13 +353,14 @@ func (a *analyzer) symNode(kind string, fn *types.Func) *graph.Node {
 	if rn, ok := a.symRegName[fn]; ok {
 		name = rn
 	}
-	svc := ""
+	svc, pkgPath := "", ""
 	if fn.Pkg() != nil {
 		svc = fn.Pkg().Name()
+		pkgPath = fn.Pkg().Path()
 	}
 	n := &graph.Node{
 		ID: id, Kind: kind, Name: name, Symbol: funcSymbol(fn),
-		File: file, Line: line, Service: svc, Namespace: "default",
+		File: file, Line: line, Service: svc, Package: pkgPath, Namespace: "default",
 		TaskQueues: a.symQueues[fn], Registered: a.symRegName[fn] != "",
 	}
 	a.nodes[id] = n

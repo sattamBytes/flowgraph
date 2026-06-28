@@ -1,5 +1,6 @@
-// Command tcg is the temporal-code-graph CLI: it statically analyzes Temporal
-// Go projects and reconnects the control plane to workflows/activities by name.
+// Command fg is the flowgraph CLI: it statically maps how a Go app flows —
+// from REST/Temporal entrypoints, through function calls and branches, and
+// across Temporal's connect-by-name boundary into workflows and activities.
 package main
 
 import (
@@ -7,22 +8,23 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sattamBytes/temporal-code-graph/internal/analyze"
-	"github.com/sattamBytes/temporal-code-graph/internal/check"
-	"github.com/sattamBytes/temporal-code-graph/internal/export"
-	"github.com/sattamBytes/temporal-code-graph/internal/graph"
-	"github.com/sattamBytes/temporal-code-graph/internal/mcp"
-	"github.com/sattamBytes/temporal-code-graph/internal/serve"
+	"github.com/sattamBytes/flowgraph/internal/analyze"
+	"github.com/sattamBytes/flowgraph/internal/check"
+	"github.com/sattamBytes/flowgraph/internal/export"
+	"github.com/sattamBytes/flowgraph/internal/graph"
+	"github.com/sattamBytes/flowgraph/internal/mcp"
+	"github.com/sattamBytes/flowgraph/internal/serve"
 	"github.com/spf13/cobra"
 )
 
 func main() {
 	root := &cobra.Command{
-		Use:   "tcg",
-		Short: "temporal-code-graph: static analysis for Temporal Go projects",
-		Long: "tcg statically connects the control plane (code that starts workflows by NAME)\n" +
-			"to the workflows, activities, child workflows, and signals they use, then lints\n" +
-			"for common Temporal bugs. It never executes your code.",
+		Use:   "fg",
+		Short: "flowgraph: static code-flow analysis for Go (REST + Temporal aware)",
+		Long: "fg statically maps how a Go application flows: from entrypoints (REST routes,\n" +
+			"Temporal workflows) through function calls and the branches that guard them, and\n" +
+			"across Temporal's connect-by-name boundary into workflows and activities.\n" +
+			"It never executes your code.",
 	}
 	root.AddCommand(buildCmd(), checkCmd(), exportCmd(), serveCmd(), mcpCmd())
 	if err := root.Execute(); err != nil {

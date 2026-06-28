@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sattamBytes/temporal-code-graph/internal/analyze"
-	"github.com/sattamBytes/temporal-code-graph/internal/graph"
+	"github.com/sattamBytes/flowgraph/internal/analyze"
+	"github.com/sattamBytes/flowgraph/internal/graph"
 )
 
 func load(t *testing.T) *graph.Graph {
@@ -177,4 +177,71 @@ func TestOrphanHasNode(t *testing.T) {
 	if rc == nil || !rc.Registered || rc.Started {
 		t.Errorf("RefundCard = %v, want registered & not started", rc)
 	}
+}
+
+// callEdge finds a CALLS edge from a Function node to a node named toName.
+func callEdge(g *graph.Graph, fromName, toName string) *graph.Edge {
+	from := node(g, graph.KindFunction, fromName)
+	if from == nil {
+		return nil
+	}
+	for i := range g.Edges {
+		e := &g.Edges[i]
+		if e.Kind != graph.EdgeCalls || e.From != from.ID {
+			continue
+		}
+		if t := g.NodeByID(e.To); t != nil && t.Name == toName {
+			return e
+		}
+	}
+	return nil
+}
+
+func TestCallGraphResolvedCall(t *testing.T) {
+	g := load(t)
+	e := callEdge(g, "Handle", "prepare")
+	if e == nil {
+		t.Fatal("expected resolved CALLS edge Handle -> prepare")
+	}
+	if e.Resolution != graph.Resolved {
+		t.Errorf("Handle->prepare resolution = %q, want resolved", e.Resolution)
+	}
+	if e.Branch != nil {
+		t.Errorf("Handle->prepare should have no branch guard, got %+v", e.Branch)
+	}
+}
+
+func TestCallGraphInterfaceCallWithBranch(t *testing.T) {
+	g := load(t)
+	e := callEdge(g, "Handle", "Audit (interface)")
+	if e == nil {
+		t.Fatal("expected CALLS edge Handle -> Audit (interface)")
+	}
+	if e.Resolution != graph.Unresolved {
+		t.Errorf("interface call resolution = %q, want unresolved (impl unknown)", e.Resolution)
+	}
+	if e.Branch == nil || e.Branch.Kind != "if" || e.Branch.Cond != `orderID == ""` {
+		t.Errorf("interface call branch = %+v, want {if, orderID == \"\"}", e.Branch)
+	}
+	if n := node(g, graph.KindInterface, "Audit (interface)"); n == nil {
+		t.Error("expected an InterfaceCall node for Audit")
+	}
+}
+
+func TestCallBridgesIntoTemporal(t *testing.T) {
+	g := load(t)
+	// Handle (a plain Function) starts OrderWorkflow — the function node is shared
+	// between the call graph and the Temporal layer, so the chain bridges through.
+	h := node(g, graph.KindFunction, "Handle")
+	if h == nil {
+		t.Fatal("Handle node missing")
+	}
+	for _, e := range g.Edges {
+		if e.Kind == graph.EdgeStartsWorkflow && e.From == h.ID {
+			if tgt := g.NodeByID(e.To); tgt != nil && tgt.Name == "OrderWorkflow" {
+				return // bridged
+			}
+		}
+	}
+	t.Error("Handle should bridge into OrderWorkflow via STARTS_WORKFLOW from the same function node")
 }
