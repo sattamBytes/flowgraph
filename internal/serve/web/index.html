@@ -9,31 +9,33 @@
   * { box-sizing: border-box; }
   body { margin: 0; display: flex; height: 100vh; }
   #cy { flex: 1; height: 100%; background: #fafafa; }
-  #side { width: 320px; padding: 14px; border-left: 1px solid #e5e7eb; overflow: auto; font-size: 13px; }
-  h1 { font-size: 15px; margin: 0 0 10px; }
+  #side { width: 340px; padding: 14px; border-left: 1px solid #e5e7eb; overflow: auto; font-size: 13px; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  .sub { color: #6b7280; font-size: 11px; margin-bottom: 12px; }
   .row { margin-bottom: 10px; }
   label { display: block; font-weight: 600; margin-bottom: 3px; font-size: 12px; color: #374151; }
   select { width: 100%; padding: 4px; }
-  #info { white-space: pre-wrap; background: #f3f4f6; padding: 8px; border-radius: 6px; min-height: 60px; }
+  #info { white-space: pre-wrap; background: #f3f4f6; padding: 8px; border-radius: 6px; min-height: 50px; }
   .legend span { display: inline-block; padding: 2px 6px; border-radius: 4px; margin: 2px; font-size: 11px; }
   a { color: #2563eb; }
   .hint { color: #6b7280; font-size: 11px; }
   #tooltip { position: absolute; background: #111827; color: #fff; padding: 6px 8px; border-radius: 5px;
-             font-size: 12px; pointer-events: none; display: none; max-width: 260px; z-index: 10; }
+             font-size: 12px; pointer-events: none; display: none; max-width: 280px; z-index: 10; }
 </style>
 <div id="cy"></div>
 <div id="tooltip"></div>
 <div id="side">
   <h1>flowgraph</h1>
+  <div class="sub">code-flow graph · REST + Temporal aware</div>
+  <div class="row">
+    <label>Entrypoint (trace its flow)</label>
+    <select id="fEntry"><option value="">— whole graph —</option></select>
+  </div>
   <div class="row">
     <label>Service</label>
     <select id="fService"><option value="">all</option></select>
   </div>
-  <div class="row">
-    <label>Task queue</label>
-    <select id="fQueue"><option value="">all</option></select>
-  </div>
-  <div class="row hint">Click a node for blast radius (upstream + downstream). Click empty space to reset.</div>
+  <div class="row hint">Pick an entrypoint to trace its downstream flow. Click any node for its blast radius (callers + callees). Click empty space to reset.</div>
   <div class="row">
     <label>Selected</label>
     <div id="info">nothing selected</div>
@@ -42,32 +44,42 @@
 </div>
 <script>
 const colors = {
-  Workflow: "#2563eb", Activity: "#16a34a", ControlPlaneCaller: "#ca8a04",
-  Signal: "#a21caf", Query: "#ea580c"
+  RESTEndpoint: "#ca8a04", GRPCEndpoint: "#ca8a04",
+  Function: "#64748b", InterfaceCall: "#dc2626",
+  Workflow: "#2563eb", Activity: "#16a34a",
+  Signal: "#a21caf", Query: "#ea580c", ControlPlaneCaller: "#ca8a04"
 };
 const lg = document.getElementById("legend");
 for (const [k, v] of Object.entries(colors)) {
+  if (k === "ControlPlaneCaller") continue;
   const s = document.createElement("span");
   s.textContent = k; s.style.background = v + "22"; s.style.border = "1px solid " + v;
   lg.appendChild(s);
 }
 
-fetch("graph.json").then(r => r.json()).then(g => boot(g));
+fetch("graph.json").then(r => r.json()).then(boot);
+
+function edgeLabel(e) {
+  if (e.branch) return e.branch.kind + (e.branch.cond ? ": " + e.branch.cond : "");
+  if (e.taskQueue) return "@" + e.taskQueue;
+  return "";
+}
 
 function boot(g) {
   const elements = [];
   for (const n of g.nodes) {
     elements.push({ data: {
       id: n.id, label: n.name, kind: n.kind, service: n.service || "",
-      queues: (n.taskQueues || []).join(","), file: n.file, line: n.line,
-      registered: !!n.registered, started: !!n.started, listener: !!n.hasListener
+      file: n.file, line: n.line, queues: (n.taskQueues || []).join(","),
+      entrypoint: !!n.entrypoint, registered: !!n.registered, started: !!n.started,
+      handler: n.handlerSymbol || ""
     }});
   }
   for (let i = 0; i < g.edges.length; i++) {
     const e = g.edges[i];
     elements.push({ data: {
       id: "e" + i, source: e.from, target: e.to, kind: e.kind,
-      resolution: e.resolution, queue: e.taskQueue || "",
+      resolution: e.resolution, label: edgeLabel(e), queue: e.taskQueue || "",
       timeout: !!e.hasTimeout, retry: !!e.hasRetry, unresolved: e.resolution !== "resolved"
     }});
   }
@@ -77,64 +89,82 @@ function boot(g) {
     elements,
     style: [
       { selector: "node", style: {
-        "label": "data(label)", "font-size": 10, "text-wrap": "wrap", "text-max-width": 90,
-        "text-valign": "center", "color": "#111827", "width": 50, "height": 50,
+        "label": "data(label)", "font-size": 10, "text-wrap": "wrap", "text-max-width": 100,
+        "text-valign": "center", "color": "#111827", "width": 54, "height": 54,
         "background-color": ele => colors[ele.data("kind")] || "#888",
         "background-opacity": 0.25, "border-width": 2,
         "border-color": ele => colors[ele.data("kind")] || "#888"
       }},
       { selector: 'node[kind = "Activity"]', style: { "shape": "round-rectangle" } },
+      { selector: 'node[kind = "RESTEndpoint"]', style: { "shape": "tag" } },
+      { selector: 'node[kind = "GRPCEndpoint"]', style: { "shape": "tag" } },
       { selector: 'node[kind = "Signal"]', style: { "shape": "diamond" } },
       { selector: 'node[kind = "Query"]', style: { "shape": "diamond" } },
+      { selector: 'node[kind = "InterfaceCall"]', style: { "shape": "hexagon" } },
       { selector: "edge", style: {
-        "label": "data(queue)", "font-size": 8, "color": "#6b7280", "curve-style": "bezier",
-        "target-arrow-shape": "triangle", "width": 1.5,
+        "label": "data(label)", "font-size": 8, "color": "#6b7280", "curve-style": "bezier",
+        "target-arrow-shape": "triangle", "width": 1.4, "text-rotation": "autorotate",
         "line-color": "#9ca3af", "target-arrow-color": "#9ca3af"
       }},
-      { selector: "edge[?unresolved]", style: {
-        "line-style": "dashed", "line-color": "#dc2626", "target-arrow-color": "#dc2626"
-      }},
-      { selector: ".faded", style: { "opacity": 0.12 } },
+      { selector: 'edge[kind = "HANDLES"]', style: { "line-style": "dotted", "line-color": "#ca8a04", "target-arrow-color": "#ca8a04" } },
+      { selector: "edge[?unresolved]", style: { "line-style": "dashed", "line-color": "#dc2626", "target-arrow-color": "#dc2626" } },
+      { selector: ".faded", style: { "opacity": 0.08 } },
       { selector: ".hidden", style: { "display": "none" } }
     ],
-    layout: { name: "breadthfirst", directed: true, spacingFactor: 1.3 }
+    layout: { name: "breadthfirst", directed: true, spacingFactor: 1.25 }
   });
 
-  // populate filters
+  // entrypoint dropdown: REST/gRPC endpoints + registered workflows
+  const entries = cy.nodes().filter(n =>
+    ["RESTEndpoint", "GRPCEndpoint"].includes(n.data("kind")) ||
+    (n.data("kind") === "Workflow" && n.data("registered")));
+  const eSel = document.getElementById("fEntry");
+  entries.sort((a, b) => a.data("label").localeCompare(b.data("label"))).forEach(n => {
+    const o = document.createElement("option");
+    o.value = n.id(); o.textContent = (n.data("kind") === "Workflow" ? "⚙ " : "▸ ") + n.data("label");
+    eSel.appendChild(o);
+  });
+
   fill("fService", new Set(cy.nodes().map(n => n.data("service")).filter(Boolean)));
-  const queues = new Set();
-  cy.nodes().forEach(n => (n.data("queues") || "").split(",").forEach(q => q && queues.add(q)));
-  fill("fQueue", queues);
-  document.getElementById("fService").onchange = applyFilters;
-  document.getElementById("fQueue").onchange = applyFilters;
-  function applyFilters() {
-    const s = document.getElementById("fService").value;
-    const q = document.getElementById("fQueue").value;
+
+  function recompute() {
+    const entry = document.getElementById("fEntry").value;
+    const svc = document.getElementById("fService").value;
+    let visible = cy.elements();
+    if (entry) {
+      const root = cy.getElementById(entry);
+      visible = root.union(root.successors());
+    }
+    const visibleNodes = visible.nodes();
     cy.nodes().forEach(n => {
-      const okS = !s || n.data("service") === s;
-      const okQ = !q || (n.data("queues") || "").split(",").includes(q);
-      n.toggleClass("hidden", !(okS && okQ));
+      const inScope = visibleNodes.contains(n);
+      const okSvc = !svc || n.data("service") === svc;
+      n.toggleClass("hidden", !(inScope && okSvc));
     });
     cy.edges().forEach(e => e.toggleClass("hidden",
       e.source().hasClass("hidden") || e.target().hasClass("hidden")));
+    cy.elements().removeClass("faded");
+    if (entry) cy.layout({ name: "breadthfirst", directed: true, spacingFactor: 1.25 }).run();
   }
+  document.getElementById("fEntry").onchange = recompute;
+  document.getElementById("fService").onchange = recompute;
 
-  // blast radius
+  // blast radius on click (within visible)
   cy.on("tap", "node", evt => {
     const n = evt.target;
     const keep = n.union(n.successors()).union(n.predecessors());
-    cy.elements().addClass("faded");
+    cy.elements().not(".hidden").addClass("faded");
     keep.removeClass("faded");
     const d = n.data();
     const link = "vscode://file/" + d.file + ":" + d.line;
     document.getElementById("info").innerHTML =
       `<b>${d.label}</b> (${d.kind})\n` +
-      `service: ${d.service || "-"}\n` +
-      `queues: ${d.queues || "-"}\n` +
-      `registered: ${d.registered}  started: ${d.started}\n` +
+      (d.handler ? `handler: ${d.handler}\n` : "") +
+      (d.service ? `service: ${d.service}\n` : "") +
+      (d.queues ? `queues: ${d.queues}\n` : "") +
       `<a href="${link}">${d.file}:${d.line}</a>`;
   });
-  cy.on("tap", evt => { if (evt.target === cy) { cy.elements().removeClass("faded"); }});
+  cy.on("tap", evt => { if (evt.target === cy) cy.elements().removeClass("faded"); });
 
   // edge tooltip
   const tip = document.getElementById("tooltip");

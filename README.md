@@ -1,164 +1,133 @@
-# temporal-code-graph (`tcg`)
+# flowgraph (`fg`)
 
-Static analysis for [Temporal](https://temporal.io) projects written in Go. It
-reads your source **without running anything**, reconnects Temporal's
-"connect by name" wiring into a graph, and lints for the bugs that graph reveals.
+Static **code-flow analysis for Go**. Point it at your app and it maps how a
+request actually flows: from an **entrypoint** (a REST route or a Temporal
+workflow) down through the functions it calls, the branches that guard them, and
+— uniquely — straight across Temporal's *connect-by-name* boundary into
+workflows and their activities.
 
-## The problem: Temporal connects by NAME, not by call
+It reads source with `go/packages` + `go/types` (typed ASTs — it never runs your
+code, never uses regex or Tree-sitter), so it resolves which function a call
+*actually* hits instead of guessing.
 
-In a normal program, "who calls what" is a function call your tools can follow.
-In Temporal, the control plane starts work by a **string name**, and the worker
-that implements it often lives in a different package — or a different service:
+## Why it exists
 
-```go
-// control plane / API server
-client.ExecuteWorkflow(ctx, opts, "OrderWorkflow", orderID)
+Two blind spots in normal tooling:
 
-// worker (different package, maybe a different binary)
-w.RegisterWorkflow(OrderWorkflow)
+1. **Generic Go call-graph tools dead-end at Temporal.** The control plane starts
+   work by a **string name**, not a call:
 
-func OrderWorkflow(ctx workflow.Context, orderID string) error {
-    workflow.ExecuteActivity(ctx, ChargeCard, orderID)
-}
+   ```go
+   // API server                         // worker (different package/service)
+   client.ExecuteWorkflow(ctx, o,        w.RegisterWorkflow(OrderWorkflow)
+       "OrderWorkflow", id)              func OrderWorkflow(ctx workflow.Context, id string) error {
+                                             workflow.ExecuteActivity(ctx, ChargeCard, id)
+                                         }
+   ```
+   A call follower sees a string and stops. `fg` walks through it.
+
+2. **Multi-language tools (Tree-sitter based) are imprecise** and have no REST
+   route parsing, no branch flow, and no Temporal awareness. `fg` trades breadth
+   for Go-native precision.
+
+## What you get
+
+```
+POST /orders → CreateOrderHandler
+                 ├─ validate(req)
+                 ├─ if req.Coupon != "" → applyCoupon()
+                 └─ ExecuteWorkflow("OrderWorkflow")   ← jumps the Temporal name gap
+                       OrderWorkflow
+                         ├─ ChargeCard          (activity)
+                         ├─ if charged → ReserveStock (activity)
+                         └─ SendEmail           (activity)
 ```
 
-Generic Go call-graph tools follow function calls and **dead-end at the SDK
-boundary**, because the link is the string `"OrderWorkflow"`, not a call. `tcg`
-understands this model and reconnects the pieces — then tells you when the
-wiring is wrong.
-
-## How it works
-
-Built on `go/packages` + `go/types` (typed ASTs — not regex, not tree-sitter),
-in two passes:
-
-1. **Registry** — find `RegisterWorkflow` / `RegisterActivity`
-   (`…WithOptions`) sites and map each registered **name → Go function symbol**,
-   recording the **task queue** each worker registers on.
-2. **Edges** — find invocation sites (`client.ExecuteWorkflow`,
-   `workflow.ExecuteActivity` / `ExecuteChildWorkflow`, signals, …) and resolve
-   each target:
-   - a **function reference** → resolved to the exact symbol;
-   - a **string literal** → looked up in the registry;
-   - a **computed/variable string** → cannot be resolved statically, so the edge
-     is marked **`unresolved`** and surfaced. It is never guessed.
-
-SDK calls are identified by the **resolved package path** of the callee
-(`go.temporal.io/sdk/client`, `…/workflow`, `…/worker`) — so your own
-`ExecuteWorkflow` helper never causes a false positive.
-
-The **JSON graph is the canonical artifact**; every other output (`check`,
-`export`, `serve`, `mcp`) is built from it. The analyzer is fully usable
-headless / in CI.
+- **Real call graph** — `func → func`, resolved exactly; interface/callback calls
+  it can't pin are drawn dotted and labeled "unknown" (never guessed).
+- **Branch context** on every call ("runs only if `err != nil`").
+- **Entrypoints** auto-detected: **net/http, chi, gin, echo** (pluggable — more
+  are a small resolver away), plus Temporal workflows.
+- **Temporal bridge** — flows continue from a `StartWorkflow` into the workflow
+  and its activities/signals/child workflows.
+- **Temporal lint rules** kept from the old `tcg`: task-queue mismatch, unknown
+  name, orphans, signal mismatch, non-determinism, missing timeout/retry.
 
 ## Install
 
-### Homebrew (macOS / Linux)
-
 ```bash
-brew install sattamBytes/tap/tcg
+brew install sattamBytes/tap/fg
+# or
+go install github.com/sattamBytes/flowgraph/cmd/fg@latest
 ```
 
-### go install
-
-```bash
-go install github.com/sattamBytes/temporal-code-graph/cmd/tcg@latest
-```
-
-> `tcg` needs the Go toolchain available at runtime — it drives `go list`
-> (`go/packages`) to type-check the project it analyzes. The Homebrew formula
-> pulls `go` in as a dependency automatically.
+> `fg` needs the Go toolchain at runtime — it drives `go list` (`go/packages`)
+> to type-check the project it analyzes. The Homebrew formula pulls `go` in.
 
 ## Usage
 
+Run from your repo root (where `go build ./...` works):
+
 ```bash
-tcg build  ./...                       # emit the canonical JSON graph
-tcg check  ./...                       # run all lint rules (CI gate; see below)
-tcg check  ./... --json                # machine-readable findings
-tcg export ./... --format mermaid      # docs diagram (also: --format dot)
-tcg serve  ./...                       # interactive dashboard at localhost:8080
-tcg serve  --graph graph.json          # replay a prebuilt graph, no source
-tcg mcp    ./...                       # MCP server over stdio (for AI agents)
+fg list   ./...                       # what entrypoints did it find?
+fg serve  ./...                       # interactive dashboard (pick an entrypoint, trace its flow)
+fg build  ./...                       # canonical JSON graph (everything is built from this)
+fg check  ./...                       # Temporal lint rules; non-zero exit on errors (CI gate)
+fg export ./... --format mermaid      # docs diagram (also: dot)
+fg mcp    ./...                       # MCP server (stdio) for AI agents
 ```
 
-The path argument follows Go conventions (`./...`, a directory, a package
-pattern), the same as `go vet`.
-
-## Lint rules
-
-| Rule | Severity | What it catches |
-|------|----------|-----------------|
-| `task-queue-mismatch` | **error** | A workflow started on queue X but registered on queue Y — it hangs forever. The headline rule. |
-| `unknown-name` | **error** | A name referenced at a start/execute site that was never registered (typo / dead reference). Suggests the closest registered name. |
-| `orphan` | warning | Registered but never started / executed. |
-| `signal-mismatch` | warning | A signal/query is sent but no handler listens for that name. |
-| `non-determinism` | warning | `time.Now`, `math/rand`, direct network/DB I/O, map-range, or `go` statements inside a workflow. |
-| `missing-timeout` / `missing-retry` | warning | An activity executed with no timeout / no retry policy. |
-
-`check` exits **non-zero** when any **error**-severity finding exists, so it
-works as a CI/PR gate out of the box. Warnings do not fail the build.
-
-### Suppressing a false finding
-
-Add an inline directive on the offending line (or the comment-only line above
-it). Bare suppresses all rules; named suppresses only those listed:
-
-```go
-client.ExecuteWorkflow(ctx, opts, dynamicName) //tcg:ignore unknown-name
-```
+The path arg follows Go conventions (`./...`, a dir, a package pattern). For a
+monorepo with control plane and workers in different modules, run `fg` at the
+common root — it loads them together so the by-name wiring resolves across
+services.
 
 ## Dashboard (`serve`)
 
-A single static page (Cytoscape.js) that reads only `graph.json`:
+Pick an entrypoint → trace its downstream flow (handler → calls → branches →
+workflow → activities); everything else collapses. Click any node for its blast
+radius (callers + callees). Branch guards show on call edges; unresolved/unknown
+edges are dashed-red; `HANDLES` edges (route → handler) are dotted. Reads only
+`graph.json`, so it works headless too: `fg serve --graph graph.json`.
 
-- clickable nodes that jump to the source location;
-- hover an edge for task queue, retry, and timeout;
-- filter by service and task queue;
-- **blast-radius** mode: click a node to highlight everything upstream (what
-  triggers it) and downstream (what it triggers), fading the rest;
-- unresolved edges drawn dashed and red.
+## MCP (`mcp`)
 
-## MCP server (`mcp`)
-
-Exposes the graph over the Model Context Protocol so AI coding agents can query
-it. Wire it into Claude Code via `.mcp.json`:
+Wire into Claude Code (`.mcp.json`):
 
 ```json
-{ "mcpServers": { "tcg": { "command": "tcg", "args": ["mcp", "./..."] } } }
+{ "mcpServers": { "fg": { "command": "fg", "args": ["mcp", "./..."] } } }
 ```
 
-Tools: `downstream`, `upstream`, `who_starts`, `list_unresolved`, `get_graph`.
-Ask your agent: *"what's downstream of ChargeCard?"*, *"which endpoints start
-OrderWorkflow?"*, *"list all unresolved edges."*
+Tools: `list_entrypoints`-style queries via `callers`, `callees`, `downstream`,
+`upstream`, `who_starts`, `list_unresolved`, `get_graph`.
 
-## CI
+## Lint rules (`check`)
 
-```yaml
-- run: go install github.com/sattamBytes/temporal-code-graph/cmd/tcg@latest
-- run: tcg check ./...   # fails the PR on task-queue mismatches & unknown names
-```
+`check` stays Temporal-focused and is a drop-in CI gate (exit non-zero on
+errors): `task-queue-mismatch` (headline), `unknown-name`, `orphan`,
+`signal-mismatch`, `non-determinism`, `missing-timeout` / `missing-retry`.
+Silence a false positive inline: `//fg:ignore <rule>`.
 
 ## Design notes & limits
 
-- Pure static analysis — your code is never executed; no Temporal cluster needed.
-- Unresolved edges and findings are **first-class and clearly labeled, never
-  faked.** When `tcg` can't prove something, it says so.
-- Options read from a struct literal (or a local variable assigned one in the
-  same function). Options threaded through helpers across functions are a known
-  limit — the affected metadata is simply absent, not invented.
-- Activity timeout/retry is detected per workflow function (from
-  `workflow.WithActivityOptions`), which is how Temporal actually applies it.
+- Pure static analysis — never executes your code.
+- Unknown things are first-class: dotted edges, surfaced, never faked.
+- Interface/function-value call targets aren't resolved to implementations in v1
+  (shown as `InterfaceCall` nodes). A `--all-impls` expansion is a future option.
+- Branch context is the *nearest* enclosing guard, not a full control-flow graph.
+- gRPC and gorilla/mux resolvers are planned; adding a framework is one
+  `EntrypointResolver`.
 
 ## Development
 
 ```bash
-go test ./...   # tests run against a hermetic sample project under testdata/
+go test ./...   # hermetic: runs against testdata/sample with stub frameworks/SDK
 ```
 
-`testdata/sample` is a deliberately buggy Temporal project (one of every planted
-bug); `testdata/stubsdk` is a minimal stand-in for the Temporal SDK so tests need
+`testdata/sample` is a deliberately buggy Temporal + REST app; `testdata/stub*`
+are minimal stand-ins for the Temporal SDK and the HTTP frameworks so tests need
 no network.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Formerly `temporal-code-graph` / `tcg`.

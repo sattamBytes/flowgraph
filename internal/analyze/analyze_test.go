@@ -119,15 +119,26 @@ func TestUnresolvedEdgeLabeledNotFaked(t *testing.T) {
 
 func TestTaskQueueCarriedOnStart(t *testing.T) {
 	g := load(t)
+	// OrderWorkflow is started from several sites; one of them (the planted bug)
+	// is on the wrong queue "payments". Assert that start carries its queue.
+	var queues []string
 	for _, e := range edgesTo(g, graph.EdgeStartsWorkflow) {
 		if e.Resolution == graph.Resolved && e.TargetName == "OrderWorkflow" {
-			if e.TaskQueue != "payments" {
-				t.Errorf("OrderWorkflow start queue = %q, want payments", e.TaskQueue)
-			}
-			return
+			queues = append(queues, e.TaskQueue)
 		}
 	}
-	t.Error("resolved OrderWorkflow start edge not found")
+	if len(queues) == 0 {
+		t.Fatal("resolved OrderWorkflow start edge not found")
+	}
+	found := false
+	for _, q := range queues {
+		if q == "payments" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("OrderWorkflow starts = %v, want one on the wrong queue \"payments\"", queues)
+	}
 }
 
 func TestActivityTimeoutRetryFlags(t *testing.T) {
@@ -177,6 +188,80 @@ func TestOrphanHasNode(t *testing.T) {
 	if rc == nil || !rc.Registered || rc.Started {
 		t.Errorf("RefundCard = %v, want registered & not started", rc)
 	}
+}
+
+func TestRESTEntrypointsDetected(t *testing.T) {
+	g := load(t)
+	// net/http "POST /orders"
+	post := node(g, graph.KindRESTEndpoint, "POST /orders")
+	if post == nil || !post.Entrypoint || post.Method != "POST" || post.Path != "/orders" {
+		t.Fatalf("net/http entrypoint not detected correctly: %+v", post)
+	}
+	// chi "GET /orders/{id}"
+	get := node(g, graph.KindRESTEndpoint, "GET /orders/{id}")
+	if get == nil || get.Method != "GET" {
+		t.Fatalf("chi entrypoint not detected: %+v", get)
+	}
+	// HANDLES edge POST /orders -> CreateOrderHandler
+	var handled bool
+	for _, e := range g.Edges {
+		if e.Kind == graph.EdgeHandles && e.From == post.ID {
+			if h := g.NodeByID(e.To); h != nil && h.Name == "CreateOrderHandler" {
+				handled = true
+			}
+		}
+	}
+	if !handled {
+		t.Error("POST /orders should HANDLE CreateOrderHandler")
+	}
+}
+
+func TestMultiFrameworkEntrypoints(t *testing.T) {
+	g := load(t)
+	// One route per framework: chi, gin (variadic handler), echo (handler 2nd arg).
+	cases := map[string]string{
+		"GET /orders/{id}": "GetOrderHandler", // chi
+		"POST /gin/orders": "GinCreate",       // gin
+		"GET /echo/orders": "EchoList",        // echo
+	}
+	for route, handler := range cases {
+		n := node(g, graph.KindRESTEndpoint, route)
+		if n == nil {
+			t.Errorf("route %q not detected", route)
+			continue
+		}
+		var ok bool
+		for _, e := range g.Edges {
+			if e.Kind == graph.EdgeHandles && e.From == n.ID {
+				if h := g.NodeByID(e.To); h != nil && h.Name == handler {
+					ok = true
+				}
+			}
+		}
+		if !ok {
+			t.Errorf("route %q should HANDLE %q", route, handler)
+		}
+	}
+}
+
+func TestRESTBridgesIntoTemporal(t *testing.T) {
+	g := load(t)
+	// CreateOrderHandler -> startOrder (CALLS) -> OrderWorkflow (STARTS_WORKFLOW)
+	if callEdge(g, "CreateOrderHandler", "startOrder") == nil {
+		t.Fatal("CreateOrderHandler should call startOrder")
+	}
+	so := node(g, graph.KindFunction, "startOrder")
+	if so == nil {
+		t.Fatal("startOrder node missing")
+	}
+	for _, e := range g.Edges {
+		if e.Kind == graph.EdgeStartsWorkflow && e.From == so.ID {
+			if tgt := g.NodeByID(e.To); tgt != nil && tgt.Name == "OrderWorkflow" {
+				return // full REST -> Temporal chain present
+			}
+		}
+	}
+	t.Error("startOrder should start OrderWorkflow (REST->Temporal bridge)")
 }
 
 // callEdge finds a CALLS edge from a Function node to a node named toName.

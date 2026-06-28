@@ -84,6 +84,7 @@ func Analyze(path string) (*graph.Graph, error) {
 	a.pass2Edges()
 	a.ensureRegisteredNodes()
 	a.pass3Calls()
+	a.pass4Entrypoints()
 	return a.finalize(), nil
 }
 

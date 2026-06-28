@@ -26,7 +26,7 @@ func main() {
 			"across Temporal's connect-by-name boundary into workflows and activities.\n" +
 			"It never executes your code.",
 	}
-	root.AddCommand(buildCmd(), checkCmd(), exportCmd(), serveCmd(), mcpCmd())
+	root.AddCommand(buildCmd(), checkCmd(), exportCmd(), serveCmd(), mcpCmd(), listCmd())
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(2)
@@ -140,6 +140,40 @@ func mcpCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&graphFile, "graph", "", "use a prebuilt graph.json instead of analyzing source")
 	return c
+}
+
+func listCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list <path>",
+		Short: "List detected entrypoints (REST/gRPC routes and workflows)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			g, err := analyze.Analyze(args[0])
+			if err != nil {
+				return err
+			}
+			var rest, wf []graph.Node
+			for _, n := range g.Nodes {
+				switch n.Kind {
+				case graph.KindRESTEndpoint, graph.KindGRPCEndpoint:
+					rest = append(rest, n)
+				case graph.KindWorkflow:
+					if n.Registered {
+						wf = append(wf, n)
+					}
+				}
+			}
+			fmt.Printf("HTTP / gRPC entrypoints (%d):\n", len(rest))
+			for _, n := range rest {
+				fmt.Printf("  %-22s %s  (%s:%d)\n", n.Name, n.HandlerSymbol, n.File, n.Line)
+			}
+			fmt.Printf("\nWorkflows (%d):\n", len(wf))
+			for _, n := range wf {
+				fmt.Printf("  %-22s queues=%v  (%s:%d)\n", n.Name, n.TaskQueues, n.File, n.Line)
+			}
+			return nil
+		},
+	}
 }
 
 // loadGraph reads a prebuilt graph.json if given, else analyzes source at args[0].
