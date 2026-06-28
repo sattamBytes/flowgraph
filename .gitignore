@@ -1,0 +1,6 @@
+/tcg
+*.test
+*.out
+graph.json
+.claude/
+.idea/
